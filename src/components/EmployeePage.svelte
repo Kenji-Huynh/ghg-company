@@ -2,11 +2,12 @@
   import {
     DEPT_OPTIONS,
     PURPOSE_OPTIONS,
-    EMP_GROUND,
     HOTEL_OPTIONS,
     CABIN_OPTIONS,
+    TRIP_TRANSPORT_TYPES,
   } from '../lib/constants.js'
-  import { calcEmployeeTrip } from '../lib/calculations.js'
+  import { COMPANIES } from '../lib/companies.js'
+  import { calcEmployeeTrip, newTransportSegment } from '../lib/calculations.js'
   import { empTrips, addEmpTrip, deleteEmpTripById } from '../lib/ghg.js'
   import { confirmDanger, confirmAction, toastOk, toastErr } from '../lib/notify.js'
 
@@ -34,9 +35,8 @@
   let eDateTo = $state('')
   let eProj = $state('')
   let eNote = $state('')
-  let eGroundType = $state(EMP_GROUND[0].value)
-  let eGroundKm = $state(0)
-  let eFuel = $state(0)
+  let eCompany = $state(COMPANIES[0])
+  let otherTransports = $state([newTransportSegment()])
   let eHotelType = $state(HOTEL_OPTIONS[2].value)
   let eNights = $state(0)
   let eRooms = $state(1)
@@ -63,14 +63,26 @@
   const live = $derived.by(() =>
     calcEmployeeTrip(
       flightLegs,
-      Number(eGroundType),
-      Number(eGroundKm) || 0,
-      Number(eFuel) || 0,
+      otherTransports,
       Number(eHotelType),
       Number(eNights) || 0,
       Number(eRooms) || 1,
     ),
   )
+
+  function addTransport() {
+    otherTransports = [...otherTransports, newTransportSegment()]
+  }
+
+  async function removeTransport(id) {
+    if (otherTransports.length <= 1) {
+      toastErr('Cần ít nhất một dòng phương tiện (có thể để trống)')
+      return
+    }
+    const ok = await confirmDanger('Xóa dòng phương tiện?', '', 'Xóa')
+    if (!ok) return
+    otherTransports = otherTransports.filter((t) => t.id !== id)
+  }
 
   function addLeg() {
     flightLegs = [...flightLegs, newLeg()]
@@ -99,8 +111,6 @@
     const ok = await confirmAction('Xác nhận lưu chuyến công tác?', `Tổng ước tính: ${live.total} kg CO₂e`)
     if (!ok) return
 
-    const groundLabel =
-      EMP_GROUND.find((g) => g.value === Number(eGroundType) || g.value == eGroundType)?.label.split(' (')[0] ?? ''
     const hotelLabel =
       HOTEL_OPTIONS.find((h) => h.value === Number(eHotelType) || h.value == eHotelType)?.label.split(' (')[0] ?? ''
 
@@ -109,6 +119,7 @@
       name,
       empId,
       dept,
+      company: eCompany,
       trip,
       from: eFrom,
       to: eTo,
@@ -118,9 +129,7 @@
       proj: eProj,
       note: eNote,
       flightLegs: JSON.parse(JSON.stringify(flightLegs)),
-      groundType: groundLabel,
-      groundKm: eGroundKm,
-      fuel: eFuel,
+      otherTransports: JSON.parse(JSON.stringify(otherTransports)),
       hotelLabel,
       nights: eNights,
       rooms: eRooms,
@@ -155,9 +164,8 @@
     eDateTo = ''
     eProj = ''
     eNote = ''
-    eGroundType = EMP_GROUND[0].value
-    eGroundKm = 0
-    eFuel = 0
+    eCompany = COMPANIES[0]
+    otherTransports = [newTransportSegment()]
     eHotelType = HOTEL_OPTIONS[2].value
     eNights = 0
     eRooms = 1
@@ -202,6 +210,14 @@
           <option value="">-- Chọn --</option>
           {#each DEPT_OPTIONS as d}
             <option value={d}>{d}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="field">
+        <label>Công ty <span class="required">*</span></label>
+        <select bind:value={eCompany}>
+          {#each COMPANIES as co}
+            <option value={co}>{co}</option>
           {/each}
         </select>
       </div>
@@ -297,28 +313,52 @@
     </div>
     <button type="button" class="btn btn-add flight-legs-add" onclick={addLeg}>+ Thêm chặng bay</button>
 
-    <div class="sec-divider">Phương tiện mặt đất</div>
-    <div class="g3">
-      <div class="field">
-        <label>Loại phương tiện</label>
-        <select bind:value={eGroundType}>
-          {#each EMP_GROUND as g}
-            <option value={g.value}>{g.label}</option>
-          {/each}
-        </select>
-      </div>
-      <div class="field field-unit">
-        <label>Quãng đường</label>
-        <input type="number" placeholder="0" min="0" bind:value={eGroundKm} />
-        <span class="unit">km</span>
-      </div>
-      <div class="field field-unit">
-        <label>Nhiên liệu thực tế (nếu có)</label>
-        <input type="number" placeholder="0" min="0" bind:value={eFuel} />
-        <span class="unit">lít</span>
-        <div class="ef-hint">Nhập lít xăng sẽ dùng 2.31 kgCO₂/lít</div>
-      </div>
+    <div class="sec-divider">Phương tiện khác (ô tô, xăng, Grab, tàu…)</div>
+    <p class="flight-legs-intro">
+      Một chuyến có thể có nhiều loại: ví dụ 7 lần đổ xăng, 1 Grab, 2 chuyến bay (ở phần trên). Mỗi dòng = một loại / một nhóm hóa đơn.
+    </p>
+    <div class="flight-legs-list">
+      {#each otherTransports as seg, idx (seg.id)}
+        <div class="flight-leg-card">
+          <div class="flight-leg-card-toolbar">
+            <span class="flight-leg-badge">PT {idx + 1}</span>
+            <button type="button" class="btn btn-danger btn-sm" onclick={() => removeTransport(seg.id)}>Xóa</button>
+          </div>
+          <div class="g3 flight-leg-card-grid">
+            <div class="field">
+              <label>Loại</label>
+              <select bind:value={seg.type}>
+                {#each TRIP_TRANSPORT_TYPES as tt}
+                  <option value={tt.value}>{tt.label}</option>
+                {/each}
+              </select>
+            </div>
+            <div class="field">
+              <label>Ghi chú (VD: HĐ xăng lần 3)</label>
+              <input type="text" placeholder="Mô tả ngắn" bind:value={seg.note} />
+            </div>
+            <div class="field field-unit">
+              <label>Số lần / số hóa đơn</label>
+              <input type="number" min="1" bind:value={seg.count} />
+            </div>
+            {#if seg.type === 'fuel'}
+              <div class="field field-unit">
+                <label>Tổng lít xăng (mỗi lần)</label>
+                <input type="number" min="0" step="any" bind:value={seg.liters} />
+                <span class="unit">lít</span>
+              </div>
+            {:else}
+              <div class="field field-unit">
+                <label>Quãng đường (mỗi lần)</label>
+                <input type="number" min="0" step="any" bind:value={seg.km} />
+                <span class="unit">km</span>
+              </div>
+            {/if}
+          </div>
+        </div>
+      {/each}
     </div>
+    <button type="button" class="btn btn-add flight-legs-add" onclick={addTransport}>+ Thêm phương tiện / hóa đơn</button>
 
     <div class="sec-divider">Lưu trú</div>
     <div class="g3">
@@ -391,6 +431,7 @@
           <tr>
             <th>Nhân viên</th>
             <th>Phòng ban</th>
+            <th>Công ty</th>
             <th>Chuyến đi</th>
             <th>Hành trình</th>
             <th>Ngày</th>
@@ -404,7 +445,7 @@
         <tbody>
           {#if filteredTrips.length === 0}
             <tr>
-              <td colspan="10" style="text-align:center;color:var(--text3);padding:2rem">Chưa có dữ liệu</td>
+              <td colspan="11" style="text-align:center;color:var(--text3);padding:2rem">Chưa có dữ liệu</td>
             </tr>
           {:else}
             {#each filteredTrips as t}
@@ -412,19 +453,31 @@
                 t.flightLegs && t.flightLegs.length
                   ? t.flightLegs.map((/** @type {{from?:string,to?:string}} */ l) => `${l.from}→${l.to}`).join(' / ')
                   : '—'}
+              {@const ptSummary =
+                t.otherTransports?.length
+                  ? t.otherTransports
+                      .map(
+                        (/** @type {{type?:string,count?:number,note?:string}} */ s) =>
+                          `${s.note || s.type}${s.count > 1 ? `×${s.count}` : ''}`,
+                      )
+                      .join(' · ')
+                  : t.fuel || t.groundKm
+                    ? 'Xe/xăng (cũ)'
+                    : ''}
               <tr>
                 <td>
                   <strong>{t.name}</strong><br />
                   <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">{t.empId}</span>
                 </td>
                 <td>{t.dept}</td>
+                <td>{t.company || '—'}</td>
                 <td>
                   {t.trip}<br />
                   <span style="font-size:11px;color:var(--text3)">{t.purpose || ''}</span>
                 </td>
                 <td style="font-size:11px">{t.from || '—'} → {t.to || '—'}</td>
                 <td style="font-size:11px">{t.dateFrom || '—'}</td>
-                <td style="font-size:11px;font-family:var(--mono)">{legSummary}</td>
+                <td style="font-size:11px;font-family:var(--mono)">{legSummary}{#if ptSummary}<br /><span style="color:var(--text3)">{ptSummary}</span>{/if}</td>
                 <td class="num">{t.co2Air || 0}</td>
                 <td class="num">{t.co2Ground || 0}</td>
                 <td class="num">{t.co2Hotel || 0}</td>

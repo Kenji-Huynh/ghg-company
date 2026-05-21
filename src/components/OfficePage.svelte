@@ -1,5 +1,7 @@
 <script>
   import { EMISSION_SOURCES, UNIT_OPTIONS } from '../lib/constants.js'
+  import { COMPANIES } from '../lib/companies.js'
+  import { get } from 'svelte/store'
   import {
     equipRows,
     offSettings,
@@ -17,6 +19,7 @@
 
   let company = $state('')
   let location = $state('')
+  let defaultCompany = $state(COMPANIES[0])
 
   $effect(() => {
     company = $offSettings.company ?? ''
@@ -69,6 +72,9 @@
 
   function onAddRow() {
     addEquipRow()
+    const rows = get(equipRows)
+    const last = rows[rows.length - 1]
+    if (last) updateEquip(last.id, 'company', defaultCompany)
   }
 
   async function onConfirmRow(row) {
@@ -118,6 +124,14 @@
       <label>Địa điểm / Cơ sở</label>
       <input type="text" placeholder="Tòa nhà XYZ, Q.1, TP.HCM" bind:value={location} oninput={persistSettings} />
     </div>
+    <div class="field">
+      <label>Công ty (mặc định cho dòng mới)</label>
+      <select bind:value={defaultCompany}>
+        {#each COMPANIES as co}
+          <option value={co}>{co}</option>
+        {/each}
+      </select>
+    </div>
   </div>
 </div>
 
@@ -138,6 +152,7 @@
       <span>EF (kgCO₂e)</span>
       <span>EF Reference</span>
       <span>Khối lượng</span>
+      <span>Công ty</span>
       <span class="eq-header-confirm">Xác nhận</span>
       <span class="eq-header-del">Xóa</span>
     </div>
@@ -207,6 +222,15 @@
               step="any"
               onchange={(e) => updateEquip(row.id, 'volume', +e.currentTarget.value)}
             />
+            <select
+              class="eq-span"
+              value={row.company || defaultCompany}
+              onchange={(e) => updateEquip(row.id, 'company', e.currentTarget.value)}
+            >
+              {#each COMPANIES as co}
+                <option value={co}>{co}</option>
+              {/each}
+            </select>
             <div class="eq-confirm-cell">
               <button
                 type="button"
@@ -251,13 +275,14 @@
             <th>Khối lượng</th>
             <th>EF</th>
             <th>Tổng GHG (tấn CO₂e)</th>
+            <th>Công ty</th>
             <th class="eq-summary-actions-th">Thao tác</th>
           </tr>
         </thead>
         <tbody>
           {#if confirmedEquipRows.length === 0}
             <tr>
-              <td colspan="8" style="text-align:center;color:var(--text3);padding:1.5rem">
+              <td colspan="9" style="text-align:center;color:var(--text3);padding:1.5rem">
                 {#if $equipRows.length === 0}
                   Chưa có dữ liệu
                 {:else if draftEquipRows.length > 0}
@@ -280,6 +305,7 @@
                 <td class="num">{r.volume || 0}</td>
                 <td class="num">{r.ef || 0}</td>
                 <td class="num" style="font-weight:600;color:var(--accent)">{tot.toFixed(4)}</td>
+                <td>{r.company || '—'}</td>
                 <td class="eq-summary-actions">
                   <button
                     type="button"

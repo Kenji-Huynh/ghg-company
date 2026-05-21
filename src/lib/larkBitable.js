@@ -9,9 +9,13 @@
 
 import { get } from 'svelte/store'
 import { equipRows, empTrips, commuteList, isEquipInReport } from './ghg.js'
+import { migrateTripTransports } from './calculations.js'
+import { COMPANIES } from './companies.js'
+import { snapshotTotalsForCompany } from './snapshots.js'
 
 /** Tên cột — Văn phòng (Scope 1 & 2) — trùng Base */
 export const LARK_COL_OFFICE = {
+  CongTy: 'Công ty',
   ThietBi: 'Thiết bị',
   NguonPhatThai: 'Nguồn phát thải',
   Scope: 'Scope',
@@ -24,6 +28,7 @@ export const LARK_COL_OFFICE = {
 
 /** Tên cột — Nhân viên (Scope 3) */
 export const LARK_COL_TRIP = {
+  CongTy: 'Công ty',
   HoTen: 'Họ và tên',
   MaNv: 'Mã NV',
   PhongBan: 'Phòng ban',
@@ -37,10 +42,12 @@ export const LARK_COL_TRIP = {
   Co2MatDat: 'CO₂ mặt đất (kg)',
   Co2LuuTru: 'CO₂ lưu trú (kg)',
   Tong: 'Tổng (kg CO₂e)',
+  PhuongTienChiTiet: 'Phương tiện chi tiết',
 }
 
 /** Tên cột — Đi làm hằng ngày */
 export const LARK_COL_COMMUTE = {
+  CongTy: 'Công ty',
   HoTen: 'Họ và tên',
   MaNv: 'Mã NV',
   PhongBan: 'Phòng ban',
@@ -50,6 +57,21 @@ export const LARK_COL_COMMUTE = {
   Wfh: 'WFH (ngày/tháng)',
   Carpool: 'Carpool (người)',
   Co2e: 'CO₂e (kg)',
+}
+
+/** Bảng tổng hợp đóng kỳ (snapshot) */
+export const LARK_COL_CLOSE = {
+  Ky: 'Kỳ',
+  Loai: 'Loại',
+  CongTy: 'Công ty',
+  Scope1: 'Scope 1 (tấn)',
+  Scope2: 'Scope 2 (tấn)',
+  Scope3: 'Scope 3 (tấn)',
+  Tong: 'Tổng (tấn)',
+  NgayDong: 'Ngày đóng kỳ',
+  SoVanPhong: 'Số dòng văn phòng',
+  SoChuyen: 'Số chuyến CT',
+  SoDiLam: 'Số dòng đi làm',
 }
 
 /** @param {unknown} v */
@@ -88,8 +110,24 @@ function norm(v) {
 }
 
 /** @param {Record<string, unknown>} f */
+/** @param {Record<string, unknown>} trip */
+function formatTripTransportDetail(trip) {
+  const segs = migrateTripTransports(trip)
+  if (!segs.length) return ''
+  return segs
+    .map((s) => {
+      const n = Math.max(1, Number(s.count) || 1)
+      const parts = [s.note || s.type]
+      if (s.liters) parts.push(`${s.liters}L`)
+      if (s.km) parts.push(`${s.km}km`)
+      return `${parts.join(' ')}×${n}`
+    })
+    .join('; ')
+}
+
 function officeSig(f) {
   return [
+    norm(f[C.CongTy]),
     norm(f[C.ThietBi]),
     norm(f[C.NguonPhatThai]),
     norm(f[C.Scope]),
@@ -104,6 +142,7 @@ function officeSig(f) {
 /** @param {Record<string, unknown>} f */
 function tripSig(f) {
   return [
+    norm(f[T.CongTy]),
     norm(f[T.MaNv]),
     norm(f[T.TenChuyen]),
     norm(f[T.NgayDi]),
@@ -116,7 +155,70 @@ function tripSig(f) {
 
 /** @param {Record<string, unknown>} f */
 function commuteSig(f) {
-  return [norm(f[M.MaNv]), norm(f[M.PhuongTien]), norm(f[M.KmMotChieu]), norm(f[M.NgayDiLamThang]), norm(f[M.Wfh])].join('|')
+  return [
+    norm(f[M.CongTy]),
+    norm(f[M.MaNv]),
+    norm(f[M.PhuongTien]),
+    norm(f[M.KmMotChieu]),
+    norm(f[M.NgayDiLamThang]),
+    norm(f[M.Wfh]),
+  ].join('|')
+}
+
+/** @param {unknown[]} equip @param {unknown[]} trips @param {unknown[]} commute */
+function buildLarkRecordsFromRows(equip, trips, commute) {
+  const officeRows = equip.filter(isEquipInReport)
+  const officeFields = officeRows.map((r) => {
+    const tot = r.volume && r.ef ? (r.volume * r.ef) / 1000 : 0
+    return fieldsAllText({
+      [C.CongTy]: r.company || '',
+      [C.ThietBi]: r.equipment || '',
+      [C.NguonPhatThai]: r.source || '',
+      [C.Scope]: r.scope ?? '',
+      [C.DonVi]: r.unit || '',
+      [C.KhoiLuong]: r.volume ?? '',
+      [C.Ef]: r.ef ?? '',
+      [C.EfRef]: r.efRef || '',
+      [C.TongGhg]: tot,
+    })
+  })
+
+  const tripRows = trips.map((trip) =>
+    fieldsAllText({
+      [T.CongTy]: trip.company || '',
+      [T.HoTen]: trip.name || '',
+      [T.MaNv]: trip.empId || '',
+      [T.PhongBan]: trip.dept || '',
+      [T.TenChuyen]: trip.trip || '',
+      [T.MucDich]: trip.purpose || '',
+      [T.XuatPhat]: trip.from || '',
+      [T.Den]: trip.to || '',
+      [T.NgayDi]: trip.dateFrom || '',
+      [T.NgayVe]: trip.dateTo || '',
+      [T.Co2Bay]: trip.co2Air ?? '',
+      [T.Co2MatDat]: trip.co2Ground ?? '',
+      [T.Co2LuuTru]: trip.co2Hotel ?? '',
+      [T.Tong]: trip.co2Total ?? '',
+      [T.PhuongTienChiTiet]: formatTripTransportDetail(trip),
+    }),
+  )
+
+  const commuteRows = commute.map((c) =>
+    fieldsAllText({
+      [M.CongTy]: c.company || '',
+      [M.HoTen]: c.name || '',
+      [M.MaNv]: c.empId || '',
+      [M.PhongBan]: c.dept || '',
+      [M.PhuongTien]: c.vehicle || '',
+      [M.KmMotChieu]: c.km ?? '',
+      [M.NgayDiLamThang]: c.days ?? '',
+      [M.Wfh]: c.wfh ?? '',
+      [M.Carpool]: c.carpool ?? '',
+      [M.Co2e]: c.co2 ?? '',
+    }),
+  )
+
+  return { officeFields, tripRows, commuteRows }
 }
 
 /** Base URL: dev = proxy Vite; production (Vercel) = /api/lark */
@@ -269,54 +371,7 @@ const M = LARK_COL_COMMUTE
  * @returns {{ officeFields: Record<string, string>[], tripRows: Record<string, string>[], commuteRows: Record<string, string>[] }}
  */
 export function buildLarkPeriodRecords() {
-  const officeRows = get(equipRows).filter(isEquipInReport)
-  const officeFields = officeRows.map((r) => {
-    const tot = r.volume && r.ef ? (r.volume * r.ef) / 1000 : 0
-    return fieldsAllText({
-      [C.ThietBi]: r.equipment || '',
-      [C.NguonPhatThai]: r.source || '',
-      [C.Scope]: r.scope ?? '',
-      [C.DonVi]: r.unit || '',
-      [C.KhoiLuong]: r.volume ?? '',
-      [C.Ef]: r.ef ?? '',
-      [C.EfRef]: r.efRef || '',
-      [C.TongGhg]: tot,
-    })
-  })
-
-  const tripRows = get(empTrips).map((trip) =>
-    fieldsAllText({
-      [T.HoTen]: trip.name || '',
-      [T.MaNv]: trip.empId || '',
-      [T.PhongBan]: trip.dept || '',
-      [T.TenChuyen]: trip.trip || '',
-      [T.MucDich]: trip.purpose || '',
-      [T.XuatPhat]: trip.from || '',
-      [T.Den]: trip.to || '',
-      [T.NgayDi]: trip.dateFrom || '',
-      [T.NgayVe]: trip.dateTo || '',
-      [T.Co2Bay]: trip.co2Air ?? '',
-      [T.Co2MatDat]: trip.co2Ground ?? '',
-      [T.Co2LuuTru]: trip.co2Hotel ?? '',
-      [T.Tong]: trip.co2Total ?? '',
-    }),
-  )
-
-  const commuteRows = get(commuteList).map((c) =>
-    fieldsAllText({
-      [M.HoTen]: c.name || '',
-      [M.MaNv]: c.empId || '',
-      [M.PhongBan]: c.dept || '',
-      [M.PhuongTien]: c.vehicle || '',
-      [M.KmMotChieu]: c.km ?? '',
-      [M.NgayDiLamThang]: c.days ?? '',
-      [M.Wfh]: c.wfh ?? '',
-      [M.Carpool]: c.carpool ?? '',
-      [M.Co2e]: c.co2 ?? '',
-    }),
-  )
-
-  return { officeFields, tripRows, commuteRows }
+  return buildLarkRecordsFromRows(get(equipRows), get(empTrips), get(commuteList))
 }
 
 /**
@@ -378,6 +433,100 @@ export async function syncCurrentPeriodToLark(s) {
   const commute = await batchCreateRecords(prefix, token, appToken, tCommute, commuteToCreate)
 
   return { office, trips, commute, skippedOffice, skippedTrips, skippedCommute }
+}
+
+const CL = LARK_COL_CLOSE
+
+/** @param {import('./snapshots.js').PeriodSnapshot} snap @param {import('./larkSettings.js').LarkBitableSettings} s */
+export async function syncSnapshotToLark(snap, s) {
+  const prefix = larkOpenApiPrefix()
+  const token = await fetchTenantAccessToken(prefix, s.appId.trim(), s.appSecret.trim())
+  const appToken = s.baseAppToken.trim()
+  const tOffice = s.tableOffice.trim()
+  const tTrips = s.tableTrips.trim()
+  const tCommute = s.tableCommute.trim()
+  const tClose = String(s.tableClose || import.meta.env.VITE_LARK_TABLE_CLOSE || '').trim()
+
+  const { officeFields, tripRows, commuteRows } = buildLarkRecordsFromRows(
+    snap.equip,
+    snap.emptrips,
+    snap.commute,
+  )
+
+  const existingOffice = await fetchExistingSignatures(prefix, token, appToken, tOffice, officeSig)
+  const existingTrips = await fetchExistingSignatures(prefix, token, appToken, tTrips, tripSig)
+  const existingCommute = await fetchExistingSignatures(prefix, token, appToken, tCommute, commuteSig)
+  let skippedOffice = 0
+  let skippedTrips = 0
+  let skippedCommute = 0
+  const seenOffice = new Set(existingOffice)
+  const seenTrips = new Set(existingTrips)
+  const seenCommute = new Set(existingCommute)
+  const officeToCreate = officeFields.filter((f) => {
+    const sig = officeSig(f)
+    if (seenOffice.has(sig)) {
+      skippedOffice++
+      return false
+    }
+    seenOffice.add(sig)
+    return true
+  })
+  const tripsToCreate = tripRows.filter((f) => {
+    const sig = tripSig(f)
+    if (seenTrips.has(sig)) {
+      skippedTrips++
+      return false
+    }
+    seenTrips.add(sig)
+    return true
+  })
+  const commuteToCreate = commuteRows.filter((f) => {
+    const sig = commuteSig(f)
+    if (seenCommute.has(sig)) {
+      skippedCommute++
+      return false
+    }
+    seenCommute.add(sig)
+    return true
+  })
+  const office = await batchCreateRecords(prefix, token, appToken, tOffice, officeToCreate)
+  const trips = await batchCreateRecords(prefix, token, appToken, tTrips, tripsToCreate)
+  const commute = await batchCreateRecords(prefix, token, appToken, tCommute, commuteToCreate)
+
+  let closeRows = 0
+  if (tClose) {
+    const summaryFields = []
+    const companies = ['', ...COMPANIES]
+    for (const co of companies) {
+      const t = snapshotTotalsForCompany(snap, co)
+      const rep = snap.equip.filter(
+        (/** @type {{ company?: string, confirmed?: boolean }} */ r) =>
+          isEquipInReport(r) && (!co || r.company === co),
+      )
+      summaryFields.push(
+        fieldsAllText({
+          [CL.Ky]: snap.label,
+          [CL.Loai]: snap.type === 'year' ? 'Năm' : 'Tháng',
+          [CL.CongTy]: co || 'Tất cả',
+          [CL.Scope1]: t.s1.toFixed(4),
+          [CL.Scope2]: t.s2.toFixed(4),
+          [CL.Scope3]: t.s3.toFixed(4),
+          [CL.Tong]: t.total.toFixed(4),
+          [CL.NgayDong]: snap.closedAt.slice(0, 10),
+          [CL.SoVanPhong]: rep.length,
+          [CL.SoChuyen]: snap.emptrips.filter(
+            (/** @type {{ company?: string }} */ x) => !co || x.company === co,
+          ).length,
+          [CL.SoDiLam]: snap.commute.filter(
+            (/** @type {{ company?: string }} */ x) => !co || x.company === co,
+          ).length,
+        }),
+      )
+    }
+    closeRows = await batchCreateRecords(prefix, token, appToken, tClose, summaryFields)
+  }
+
+  return { office, trips, commute, closeRows, skippedOffice, skippedTrips, skippedCommute }
 }
 
 /** Gợi ý tên cột trong Lark Base (Text). Cột ID do Base tự quản — không gửi từ app. */

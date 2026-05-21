@@ -1,5 +1,6 @@
 <script>
   import { DEPT_OPTIONS, COMMUTE_VEHICLES } from '../lib/constants.js'
+  import { COMPANIES } from '../lib/companies.js'
   import { calcCommute } from '../lib/calculations.js'
   import { commuteList, upsertCommute, deleteCommuteById } from '../lib/ghg.js'
   import { confirmDanger, confirmAction, toastOk, toastErr } from '../lib/notify.js'
@@ -7,6 +8,7 @@
   let cName = $state('')
   let cEmpid = $state('')
   let cDept = $state('')
+  let cCompany = $state(COMPANIES[0])
   let cVehicle = $state(COMMUTE_VEHICLES[0].value)
   let cKm = $state(0)
   let cDays = $state(22)
@@ -84,6 +86,7 @@
       name,
       empId,
       dept: cDept,
+      company: cCompany,
       vehicle: vehicleLabel,
       ef,
       km,
@@ -108,6 +111,7 @@
     cName = ''
     cEmpid = ''
     cDept = ''
+    cCompany = COMPANIES[0]
     cVehicle = COMMUTE_VEHICLES[0].value
     cKm = 0
     cDays = 22
@@ -153,6 +157,14 @@
           <option value="">-- Chọn --</option>
           {#each DEPT_OPTIONS as d}
             <option value={d}>{d}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="field">
+        <label>Công ty <span class="required">*</span></label>
+        <select bind:value={cCompany}>
+          {#each COMPANIES as co}
+            <option value={co}>{co}</option>
           {/each}
         </select>
       </div>
@@ -246,6 +258,7 @@
             <th>Họ và tên</th>
             <th>Mã NV</th>
             <th>Phòng ban</th>
+            <th>Công ty</th>
             <th>Phương tiện</th>
             <th>Km/ngày (1 chiều)</th>
             <th>Ngày/tháng</th>
@@ -258,7 +271,7 @@
         <tbody>
           {#if filteredCommute.length === 0}
             <tr>
-              <td colspan="11" style="text-align:center;color:var(--text3);padding:2rem">Chưa có dữ liệu</td>
+              <td colspan="12" style="text-align:center;color:var(--text3);padding:2rem">Chưa có dữ liệu</td>
             </tr>
           {:else}
             {#each filteredCommute as c, i (c.id)}
@@ -267,6 +280,7 @@
                 <td><strong>{c.name}</strong></td>
                 <td class="num">{c.empId}</td>
                 <td>{c.dept || '—'}</td>
+                <td>{c.company || '—'}</td>
                 <td>{c.vehicle}</td>
                 <td class="num">{c.km}</td>
                 <td class="num">{c.days}</td>

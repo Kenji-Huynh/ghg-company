@@ -24,6 +24,7 @@
   import EmployeePage from './components/EmployeePage.svelte'
   import CommutePage from './components/CommutePage.svelte'
   import LarkSyncModal from './components/LarkSyncModal.svelte'
+  import ClosePeriodPage from './components/ClosePeriodPage.svelte'
 
   let showPeriodsModal = $state(false)
   let showLarkModal = $state(false)
@@ -289,6 +290,9 @@
   <button type="button" class="nav-tab" class:active={$activePage === 'commute'} onclick={() => setActivePage('commute')}>
     Đi làm hàng ngày
   </button>
+  <button type="button" class="nav-tab" class:active={$activePage === 'close'} onclick={() => setActivePage('close')}>
+    Đóng kỳ
+  </button>
 </div>
 
 {#if showPeriodsModal}
@@ -348,7 +352,9 @@
     <OfficePage />
   {:else if $activePage === 'employee'}
     <EmployeePage />
-  {:else}
+  {:else if $activePage === 'commute'}
     <CommutePage />
+  {:else}
+    <ClosePeriodPage />
   {/if}
 </div>

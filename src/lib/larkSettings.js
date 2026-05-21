@@ -5,6 +5,7 @@
  * @property {string} tableOffice
  * @property {string} tableTrips
  * @property {string} tableCommute
+ * @property {string} tableClose
  */
 
 const STORAGE_KEY = 'ghg-lark-bitable'
@@ -17,6 +18,7 @@ const defaults = {
   tableOffice: '',
   tableTrips: '',
   tableCommute: '',
+  tableClose: '',
 }
 
 /** Giá trị mặc định từ `.env.local` (VITE_LARK_*) — override bởi localStorage nếu đã lưu từ UI. */
@@ -28,6 +30,7 @@ function fromEnv() {
     tableOffice: String(import.meta.env.VITE_LARK_TABLE_OFFICE ?? '').trim(),
     tableTrips: String(import.meta.env.VITE_LARK_TABLE_TRIPS ?? '').trim(),
     tableCommute: String(import.meta.env.VITE_LARK_TABLE_COMMUTE ?? '').trim(),
+    tableClose: String(import.meta.env.VITE_LARK_TABLE_CLOSE ?? '').trim(),
   }
 }
 
@@ -40,6 +43,7 @@ function mergePreferEnv(stored, env) {
     tableOffice: env.tableOffice || stored.tableOffice,
     tableTrips: env.tableTrips || stored.tableTrips,
     tableCommute: env.tableCommute || stored.tableCommute,
+    tableClose: env.tableClose || stored.tableClose,
   }
 }
 
@@ -59,6 +63,7 @@ export function loadLarkSettings() {
       tableOffice: String(o.tableOffice ?? ''),
       tableTrips: String(o.tableTrips ?? ''),
       tableCommute: String(o.tableCommute ?? ''),
+      tableClose: String(o.tableClose ?? ''),
     }
     return mergePreferEnv(stored, { ...defaults, ...env })
   } catch {

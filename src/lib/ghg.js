@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store'
 import * as DB from './db.js'
 import { EMISSION_SOURCES } from './constants.js'
+import { ALL_COMPANIES, matchesCompany } from './companies.js'
 
 const now = new Date()
 
@@ -16,9 +17,13 @@ export function periodLabel(m, y) {
 
 export const currentMonth = writable(now.getMonth() + 1)
 export const currentYear = writable(now.getFullYear())
-export const activePage = writable(/** @type {'dashboard'|'office'|'employee'|'commute'} */ ('dashboard'))
+export const activePage = writable(
+  /** @type {'dashboard'|'office'|'employee'|'commute'|'close'} */ ('dashboard'),
+)
+export const selectedCompany = writable(ALL_COMPANIES)
+export const dashboardMode = writable(/** @type {'month'|'year'} */ ('month'))
 
-/** @param {'dashboard'|'office'|'employee'|'commute'} p */
+/** @param {'dashboard'|'office'|'employee'|'commute'|'close'} p */
 export function setActivePage(p) {
   activePage.set(p)
 }
@@ -124,6 +129,7 @@ export function addEquipRow() {
       volume: 0,
       scope: 1,
       confirmed: false,
+      company: '',
     },
   ])
   persistEquip()
@@ -208,16 +214,26 @@ export function upsertCommute(entry) {
   persistCommute()
 }
 
-export const dash = derived([equipRows, empTrips, commuteList], ([$e, $t, $c]) => {
-  const rep = $e.filter(isEquipInReport)
+/**
+ * @param {unknown[]} equip
+ * @param {unknown[]} trips
+ * @param {unknown[]} commute
+ * @param {string} companyFilter
+ */
+export function computeDashData(equip, trips, commute, companyFilter = '') {
+  const e = equip.filter((/** @type {{ company?: string }} */ r) => matchesCompany(r.company, companyFilter))
+  const t = trips.filter((/** @type {{ company?: string }} */ x) => matchesCompany(x.company, companyFilter))
+  const c = commute.filter((/** @type {{ company?: string }} */ x) => matchesCompany(x.company, companyFilter))
+
+  const rep = e.filter(isEquipInReport)
   const s1 = rep
     .filter((r) => r.scope === 1)
     .reduce((s, r) => s + (r.volume && r.ef ? (r.volume * r.ef) / 1000 : 0), 0)
   const s2 = rep
     .filter((r) => r.scope === 2)
     .reduce((s, r) => s + (r.volume && r.ef ? (r.volume * r.ef) / 1000 : 0), 0)
-  const s3Trip = $t.reduce((s, x) => s + (x.co2Total || 0) / 1000, 0)
-  const s3Comm = $c.reduce((s, x) => s + (x.co2 || 0) / 1000, 0)
+  const s3Trip = t.reduce((s, x) => s + (x.co2Total || 0) / 1000, 0)
+  const s3Comm = c.reduce((s, x) => s + (x.co2 || 0) / 1000, 0)
   const s3 = s3Trip + s3Comm
   const total = s1 + s2 + s3
   const fmt = (n) => n.toFixed(3)
@@ -234,20 +250,20 @@ export const dash = derived([equipRows, empTrips, commuteList], ([$e, $t, $c]) =
     ...rep
       .filter((r) => r.volume && r.ef)
       .map((r) => ({ label: r.equipment || r.source || 'Thiết bị', val: (r.volume * r.ef) / 1000 })),
-    ...$t.map((x) => ({ label: `${x.trip} (${x.name})`, val: x.co2Total / 1000 })),
-    ...$c.map((x) => ({ label: `Đi làm: ${x.name}`, val: x.co2 / 1000 })),
+    ...t.map((x) => ({ label: `${x.trip} (${x.name})`, val: x.co2Total / 1000 })),
+    ...c.map((x) => ({ label: `Đi làm: ${x.name}`, val: x.co2 / 1000 })),
   ]
     .sort((a, b) => b.val - a.val)
     .slice(0, 6)
   const maxA = Math.max(...allItems.map((a) => a.val), 0.001)
 
   const deptMap = {}
-  for (const x of $t) {
+  for (const x of t) {
     deptMap[x.dept] = (deptMap[x.dept] || 0) + (x.co2Total || 0) / 1000
   }
-  for (const x of $c) {
+  for (const x of c) {
     const d = x.dept || 'Khác'
-    deptMap[d] = (deptMap[d] || 0) + (x.co2 || 0) / 1000
+    deptMap[d] = (deptMap[d] || 0) + (x.co2 / 1000)
   }
   const deptArr = Object.entries(deptMap).sort((a, b) => b[1] - a[1])
   const maxD = Math.max(...deptArr.map((d) => d[1]), 0.001)
@@ -276,7 +292,43 @@ export const dash = derived([equipRows, empTrips, commuteList], ([$e, $t, $c]) =
     offItems,
     maxO,
   }
-})
+}
+
+/** Dashboard kỳ tháng hiện tại + lọc công ty */
+export const dash = derived(
+  [equipRows, empTrips, commuteList, selectedCompany],
+  ([$e, $t, $c, $co]) => computeDashData($e, $t, $c, $co),
+)
+
+/** Dashboard tổng hợp theo năm (mọi tháng trong năm đang chọn) */
+export const dashYear = derived(
+  [currentYear, selectedCompany],
+  ([$y, $co]) => {
+    const prefix = `${$y}-`
+    let equip = []
+    let trips = []
+    let commute = []
+    for (const pk of getPeriodKeys().filter((k) => k.startsWith(prefix))) {
+      equip = equip.concat(DB.load(`ghg-equip-${pk}`) || [])
+      trips = trips.concat(DB.load(`ghg-emptrips-${pk}`) || [])
+      commute = commute.concat(DB.load(`ghg-commute-${pk}`) || [])
+    }
+    const monthly = []
+    for (let m = 1; m <= 12; m++) {
+      const pk = periodKey(m, $y)
+      const d = computeDashData(
+        DB.load(`ghg-equip-${pk}`) || [],
+        DB.load(`ghg-emptrips-${pk}`) || [],
+        DB.load(`ghg-commute-${pk}`) || [],
+        $co,
+      )
+      monthly.push({ month: m, pk, total: d.totalTon, label: periodLabel(m, $y) })
+    }
+    const agg = computeDashData(equip, trips, commute, $co)
+    const maxM = Math.max(...monthly.map((x) => x.total), 0.001)
+    return { ...agg, monthly, maxM, year: $y }
+  },
+)
 
 /** @param {string} pk */
 export function periodTotalsForKey(pk) {

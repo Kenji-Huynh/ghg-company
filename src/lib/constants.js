@@ -68,3 +68,12 @@ export const COMMUTE_VEHICLES = [
 ]
 
 export const UNIT_OPTIONS = ['lít', 'kg', 'm³', 'kWh', 'GJ', 'tấn', '—']
+
+/** Phương tiện / chi phí trong một chuyến công tác (ngoài máy bay) */
+export const TRIP_TRANSPORT_TYPES = [
+  { value: 'fuel', label: 'Đổ xăng (theo lít × số lần)' },
+  { value: 'car', label: 'Ô tô / xe (km × EF)' },
+  { value: 'grab', label: 'Grab / Taxi' },
+  { value: 'train', label: 'Tàu / xe khách' },
+  { value: 'ground', label: 'Khác (km × EF)' },
+]
